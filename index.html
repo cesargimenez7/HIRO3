@@ -9,23 +9,10 @@
     <title>AR Diablo</title>
     <style>
       body { margin:0; overflow:hidden; }
-      button#soundButton {
-        position: absolute;
-        top: 50%; left: 50%;
-        transform: translate(-50%, -50%);
-        padding: 1em 2em;
-        font-size: 1.2em;
-        background: #ff3300;
-        color: white;
-        border: none;
-        border-radius: 8px;
-        z-index: 999;
-      }
     </style>
   </head>
 
   <body>
-    <!-- Escena principal -->
     <a-scene embedded arjs vr-mode-ui="enabled: false">
       <!-- Marcador Hiro -->
       <a-marker preset="hiro" id="hiroMarker">
@@ -33,23 +20,19 @@
         <!-- Luz cálida -->
         <a-entity light="type: point; intensity: 1.5; distance: 5; color: #ff6600" position="0 1 1"></a-entity>
 
-        <!-- Sistema de partículas (aura infernal) -->
+        <!-- Partículas (aura infernal) -->
         <a-entity
           particle-system="preset: dust; color: #ff3300, #ff9900; particleCount: 1000; size: 0.1; opacity: 0.8"
           position="0 0 0">
         </a-entity>
 
-        <!-- Contenedor del diablo -->
+        <!-- Diablo -->
         <a-entity id="diabloRoot" position="0 0 0" rotation="0 180 0">
-          <!-- Modelo del diablo -->
           <a-entity
             id="diablo"
             gltf-model="diablo.glb"
             scale="0.05 0.05 0.05"
-            position="0 0 0"
-            animation__flotar="property: position; to: 0 0.8 0; dur: 1800; dir: alternate; loop: true; easing: easeInOutSine"
-            animation__rotar="property: rotation; to: 0 540 0; dur: 6000; loop: true; easing: linear"
-            sound="src: url(https://cdn.pixabay.com/audio/2022/02/16/audio_7b4f25b345.mp3); autoplay: false; loop: true; volume: 0.6">
+            position="0 0 0">
           </a-entity>
         </a-entity>
       </a-marker>
@@ -58,58 +41,54 @@
       <a-entity camera id="mainCamera"></a-entity>
     </a-scene>
 
-    <!-- Botón para habilitar sonido en móviles -->
-    <button id="soundButton">Tocar para activar sonido 🔊</button>
-
     <script>
     (function () {
       const marker = document.querySelector('#hiroMarker');
       const diablo = document.querySelector('#diablo');
       const diabloRoot = document.querySelector('#diabloRoot');
-      const soundBtn = document.getElementById('soundButton');
       const sceneEl = document.querySelector('a-scene');
 
       const TARGET_SCALE = new THREE.Vector3(2.2, 2.2, 2.2);
       const SMALL_SCALE = new THREE.Vector3(0.05, 0.05, 0.05);
 
-      let soundEnabled = false;
-      let glowActive = false;
+      let appeared = false;
+      let breathing = false;
+      let glowing = false;
 
-      // --- Activar sonido manualmente (requisito móvil) ---
-      soundBtn.addEventListener('click', () => {
-        soundEnabled = true;
-        const ctx = THREE.AudioContext.getContext();
-        if (ctx.state === 'suspended') ctx.resume();
-        soundBtn.style.display = 'none';
-      });
-
-      // --- Aparición / desaparición suave ---
+      // --- Aparición suave (agrandarse una vez) ---
       function playAppear() {
+        if (appeared) return;
+        appeared = true;
         diablo.setAttribute('animation__appear', {
           property: 'scale',
           to: `${TARGET_SCALE.x} ${TARGET_SCALE.y} ${TARGET_SCALE.z}`,
-          dur: 700,
+          dur: 800,
           easing: 'easeOutCubic'
         });
       }
 
-      function playDisappear() {
-        diablo.setAttribute('animation__disappear', {
+      // --- Efecto "respirar" (agrandar/achicar levemente en bucle) ---
+      function startBreathing() {
+        if (breathing) return;
+        breathing = true;
+        diablo.setAttribute('animation__breath', {
           property: 'scale',
-          to: `${SMALL_SCALE.x} ${SMALL_SCALE.y} ${SMALL_SCALE.z}`,
-          dur: 400,
-          easing: 'easeInCubic'
+          to: '2.3 2.3 2.3',
+          dur: 1800,
+          dir: 'alternate',
+          loop: true,
+          easing: 'easeInOutSine'
         });
       }
 
-      // --- Efecto de brillo rojo pulsante ---
+      // --- Brillo pulsante rojo (energía) ---
       function startGlow() {
-        if (glowActive) return;
-        glowActive = true;
+        if (glowing) return;
+        glowing = true;
         diablo.setAttribute('animation__glow', {
           property: 'components.material.material.emissiveIntensity',
-          to: 1.5,
-          dur: 800,
+          to: 1.6,
+          dur: 1800,
           dir: 'alternate',
           loop: true,
           easing: 'easeInOutSine'
@@ -117,40 +96,24 @@
         diablo.setAttribute('animation__color', {
           property: 'material.color',
           to: '#ff3300',
-          dur: 800,
+          dur: 1800,
           dir: 'alternate',
           loop: true,
           easing: 'easeInOutSine'
         });
       }
 
-      function stopGlow() {
-        glowActive = false;
-        diablo.removeAttribute('animation__glow');
-        diablo.removeAttribute('animation__color');
-        diablo.setAttribute('material', 'color: #ffffff; emissiveIntensity: 0');
-      }
-
-      // --- Reproducir sonido y efectos mientras visible ---
+      // --- Cuando se detecta el marcador ---
       marker.addEventListener('markerFound', () => {
         playAppear();
+        startBreathing();
         startGlow();
-        if (soundEnabled) {
-          try {
-            diablo.components.sound.playSound();
-          } catch(e){}
-        }
       });
 
-      marker.addEventListener('markerLost', () => {
-        playDisappear();
-        stopGlow();
-        if (soundEnabled) {
-          try { diablo.components.sound.stopSound(); } catch(e){}
-        }
-      });
+      // --- No desaparece al perderse el marcador ---
+      marker.addEventListener('markerLost', () => {});
 
-      // --- Arrastre táctil / mouse ---
+      // --- Movimiento táctil / mouse ---
       const raycaster = new THREE.Raycaster();
       const touchPosition = new THREE.Vector2();
       const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0));
@@ -212,3 +175,4 @@
     </script>
   </body>
 </html>
+
