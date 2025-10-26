@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+    <script src="https://cdn.rawgit.com/jeromeetienne/AR.js/2.0.8/aframe/build/aframe-ar.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/IdeaSpaceVR/aframe-particle-system-component@1.0.3/dist/aframe-particle-system-component.min.js"></script>
+    <title>AR Diablo</title>
+    <style>
+      body { margin:0; overflow:hidden; }
+      button#soundButton {
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 1em 2em;
+        font-size: 1.2em;
+        background: #ff3300;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        z-index: 999;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Escena principal -->
+    <a-scene embedded arjs vr-mode-ui="enabled: false">
+      <!-- Marcador Hiro -->
+      <a-marker preset="hiro" id="hiroMarker">
+
+        <!-- Luz cálida -->
+        <a-entity light="type: point; intensity: 1.5; distance: 5; color: #ff6600" position="0 1 1"></a-entity>
+
+        <!-- Sistema de partículas (aura infernal) -->
+        <a-entity
+          particle-system="preset: dust; color: #ff3300, #ff9900; particleCount: 1000; size: 0.1; opacity: 0.8"
+          position="0 0 0">
+        </a-entity>
+
+        <!-- Contenedor del diablo -->
+        <a-entity id="diabloRoot" position="0 0 0" rotation="0 180 0">
+          <!-- Modelo del diablo -->
+          <a-entity
+            id="diablo"
+            gltf-model="diablo.glb"
+            scale="0.05 0.05 0.05"
+            position="0 0 0"
+            animation__flotar="property: position; to: 0 0.8 0; dur: 1800; dir: alternate; loop: true; easing: easeInOutSine"
+            animation__rotar="property: rotation; to: 0 540 0; dur: 6000; loop: true; easing: linear"
+            sound="src: url(https://cdn.pixabay.com/audio/2022/02/16/audio_7b4f25b345.mp3); autoplay: false; loop: true; volume: 0.6">
+          </a-entity>
+        </a-entity>
+      </a-marker>
+
+      <!-- Cámara -->
+      <a-entity camera id="mainCamera"></a-entity>
+    </a-scene>
+
+    <!-- Botón para habilitar sonido en móviles -->
+    <button id="soundButton">Tocar para activar sonido 🔊</button>
+
+    <script>
+    (function () {
+      const marker = document.querySelector('#hiroMarker');
+      const diablo = document.querySelector('#diablo');
+      const diabloRoot = document.querySelector('#diabloRoot');
+      const soundBtn = document.getElementById('soundButton');
+      const sceneEl = document.querySelector('a-scene');
+
+      const TARGET_SCALE = new THREE.Vector3(2.2, 2.2, 2.2);
+      const SMALL_SCALE = new THREE.Vector3(0.05, 0.05, 0.05);
+
+      let soundEnabled = false;
+      let glowActive = false;
+
+      // --- Activar sonido manualmente (requisito móvil) ---
+      soundBtn.addEventListener('click', () => {
+        soundEnabled = true;
+        const ctx = THREE.AudioContext.getContext();
+        if (ctx.state === 'suspended') ctx.resume();
+        soundBtn.style.display = 'none';
+      });
+
+      // --- Aparición / desaparición suave ---
+      function playAppear() {
+        diablo.setAttribute('animation__appear', {
+          property: 'scale',
+          to: `${TARGET_SCALE.x} ${TARGET_SCALE.y} ${TARGET_SCALE.z}`,
+          dur: 700,
+          easing: 'easeOutCubic'
+        });
+      }
+
+      function playDisappear() {
+        diablo.setAttribute('animation__disappear', {
+          property: 'scale',
+          to: `${SMALL_SCALE.x} ${SMALL_SCALE.y} ${SMALL_SCALE.z}`,
+          dur: 400,
+          easing: 'easeInCubic'
+        });
+      }
+
+      // --- Efecto de brillo rojo pulsante ---
+      function startGlow() {
+        if (glowActive) return;
+        glowActive = true;
+        diablo.setAttribute('animation__glow', {
+          property: 'components.material.material.emissiveIntensity',
+          to: 1.5,
+          dur: 800,
+          dir: 'alternate',
+          loop: true,
+          easing: 'easeInOutSine'
+        });
+        diablo.setAttribute('animation__color', {
+          property: 'material.color',
+          to: '#ff3300',
+          dur: 800,
+          dir: 'alternate',
+          loop: true,
+          easing: 'easeInOutSine'
+        });
+      }
+
+      function stopGlow() {
+        glowActive = false;
+        diablo.removeAttribute('animation__glow');
+        diablo.removeAttribute('animation__color');
+        diablo.setAttribute('material', 'color: #ffffff; emissiveIntensity: 0');
+      }
+
+      // --- Reproducir sonido y efectos mientras visible ---
+      marker.addEventListener('markerFound', () => {
+        playAppear();
+        startGlow();
+        if (soundEnabled) {
+          try {
+            diablo.components.sound.playSound();
+          } catch(e){}
+        }
+      });
+
+      marker.addEventListener('markerLost', () => {
+        playDisappear();
+        stopGlow();
+        if (soundEnabled) {
+          try { diablo.components.sound.stopSound(); } catch(e){}
+        }
+      });
+
+      // --- Arrastre táctil / mouse ---
+      const raycaster = new THREE.Raycaster();
+      const touchPosition = new THREE.Vector2();
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0));
+      const intersectPoint = new THREE.Vector3();
+      let dragging = false;
+      let pointerId = null;
+
+      function updateTouchVector(touch) {
+        const rect = sceneEl.canvas.getBoundingClientRect();
+        const x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
+        const y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
+        touchPosition.set(x, y);
+      }
+
+      function isTouchNearModel() {
+        const camera = sceneEl.camera;
+        raycaster.setFromCamera(touchPosition, camera);
+        const mesh = diablo.getObject3D('mesh') || diablo.getObject3D('gltf');
+        if (!mesh) return false;
+        const intersects = raycaster.intersectObject(mesh, true);
+        return intersects.length > 0;
+      }
+
+      function onTouchStart(evt) {
+        if (!marker.object3D.visible) return;
+        const touch = evt.changedTouches ? evt.changedTouches[0] : evt;
+        pointerId = touch.identifier || 'mouse';
+        updateTouchVector(touch);
+        if (isTouchNearModel()) dragging = true;
+      }
+
+      function onTouchMove(evt) {
+        if (!dragging) return;
+        const camera = sceneEl.camera;
+        const touch = evt.changedTouches ? [...evt.changedTouches].find(t => t.identifier === pointerId) : evt;
+        if (!touch) return;
+        updateTouchVector(touch);
+        raycaster.setFromCamera(touchPosition, camera);
+        const markerWorldPos = new THREE.Vector3();
+        marker.object3D.getWorldPosition(markerWorldPos);
+        plane.set(new THREE.Vector3(0, 1, 0), -markerWorldPos.y);
+        const hit = raycaster.ray.intersectPlane(plane, intersectPoint);
+        if (hit) {
+          const localPos = intersectPoint.clone();
+          marker.object3D.worldToLocal(localPos);
+          diabloRoot.setAttribute('position', `${localPos.x.toFixed(3)} 0 ${localPos.z.toFixed(3)}`);
+        }
+      }
+
+      function onTouchEnd() { dragging = false; pointerId = null; }
+
+      window.addEventListener('touchstart', onTouchStart, {passive: true});
+      window.addEventListener('touchmove', onTouchMove, {passive: true});
+      window.addEventListener('touchend', onTouchEnd, {passive: true});
+      window.addEventListener('mousedown', onTouchStart);
+      window.addEventListener('mousemove', onTouchMove);
+      window.addEventListener('mouseup', onTouchEnd);
+    })();
+    </script>
+  </body>
+</html>
